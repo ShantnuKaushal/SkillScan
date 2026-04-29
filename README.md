@@ -55,13 +55,10 @@ The frontend runs at `http://localhost:3000/`.
 
 ## Backend Commands
 
-Run Django commands through the backend container:
+Load the deterministic demo dataset into PostgreSQL, Elasticsearch, and Neo4j:
 
 ```powershell
-docker compose exec backend python manage.py prepare_sample --limit 1000 --contains python django react data backend sql elasticsearch neo4j
-docker compose exec backend python manage.py ingest_jobs --limit 1000
-docker compose exec backend python manage.py reindex_jobs
-docker compose exec backend python manage.py sync_graph
+docker compose exec backend python manage.py bootstrap_demo --limit 1000
 ```
 
 Run backend tests:

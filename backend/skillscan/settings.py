@@ -103,6 +103,10 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^http://localhost:\d+$",
+    r"^http://127\.0\.0\.1:\d+$",
+]
 
 DATA_RAW_DIR = REPO_ROOT / "data" / "raw"
 DATA_SAMPLE_DIR = REPO_ROOT / "data" / "samples"

@@ -30,3 +30,15 @@ class SkillNormalizerTests(TestCase):
 
         self.assertEqual(phrase_by_skill["React"], "ReactJS")
         self.assertEqual(phrase_by_skill["PostgreSQL"], "Postgres")
+
+    def test_uses_spacy_extraction_before_canonical_normalization(self):
+        normalizer = SkillNormalizer()
+
+        matches = normalizer.extract_skills(
+            "Build Django REST APIs with Postgres and containerized deployments."
+        )
+        phrase_by_skill = {match.canonical: match.original for match in matches}
+
+        self.assertEqual(phrase_by_skill["Django"], "Django REST APIs")
+        self.assertEqual(phrase_by_skill["PostgreSQL"], "Postgres")
+        self.assertEqual(phrase_by_skill["Docker"], "containerized deployments")

@@ -33,35 +33,56 @@ class JobSearchIndex:
         if not self.client.indices.exists(index=self.index_name):
             self.client.indices.create(index=self.index_name, **JOB_INDEX_MAPPING)
 
+    def reset_index(self) -> None:
+        if self.client.indices.exists(index=self.index_name):
+            self.client.indices.delete(index=self.index_name)
+        self.client.indices.create(index=self.index_name, **JOB_INDEX_MAPPING)
+
     def index_job(self, job: JobPosting) -> None:
         self.client.index(index=self.index_name, id=job.external_id, document=build_job_document(job))
 
-    def search(self, query: str, remote: bool | None = None, skill: str | None = None, size: int = 20) -> list[dict]:
+    def search(
+        self,
+        query: str,
+        remote: bool | None = None,
+        skill: str | None = None,
+        location: str | None = None,
+        size: int = 20,
+    ) -> tuple[int, list[dict]]:
         filters: list[dict] = []
         if remote is not None:
             filters.append({"term": {"remote_allowed": remote}})
         if skill:
             filters.append({"term": {"skills": skill}})
+        if location:
+            filters.append({"match": {"location": location}})
+
+        cleaned_query = query.strip()
+        if cleaned_query:
+            search_query = {
+                "multi_match": {
+                    "query": cleaned_query,
+                    "fields": ["title^4", "skills^3", "company^2", "location", "description"],
+                    "fuzziness": "AUTO",
+                }
+            }
+        else:
+            search_query = {"match_all": {}}
 
         response = self.client.search(
             index=self.index_name,
             size=size,
             query={
                 "bool": {
-                    "must": [
-                        {
-                            "multi_match": {
-                                "query": query,
-                                "fields": ["title^4", "skills^3", "company^2", "location", "description"],
-                                "fuzziness": "AUTO",
-                            }
-                        }
-                    ],
+                    "must": [search_query],
                     "filter": filters,
                 }
             },
         )
-        return [
+        total_value = response["hits"]["total"]
+        total = total_value["value"] if isinstance(total_value, dict) else int(total_value)
+        hits = [
             {"score": hit["_score"], **hit["_source"]}
             for hit in response["hits"]["hits"]
         ]
+        return total, hits

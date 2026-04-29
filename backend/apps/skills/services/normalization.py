@@ -3,12 +3,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
+from apps.skills.services.spacy_extractor import SpacySkillExtractor
+
 
 DEFAULT_SKILL_ALIASES: dict[str, tuple[str, ...]] = {
     "AWS": ("aws", "amazon web services"),
     "Apache Kafka": ("apache kafka", "kafka"),
-    "Django": ("django", "django rest framework", "drf", "django rest"),
-    "Docker": ("docker", "containers", "containerization"),
+    "Django": ("django", "django rest framework", "django rest api", "django rest apis", "drf", "django rest"),
+    "Docker": (
+        "docker",
+        "containers",
+        "containerization",
+        "containerized deployments",
+        "containerized deployment",
+        "containerized applications",
+    ),
     "Elasticsearch": ("elasticsearch", "elastic search", "elastic"),
     "FastAPI": ("fastapi", "fast api"),
     "GraphQL": ("graphql", "graph ql"),
@@ -39,6 +48,7 @@ class SkillMatch:
 class SkillNormalizer:
     def __init__(self, aliases: dict[str, tuple[str, ...]] | None = None) -> None:
         self.aliases = aliases or DEFAULT_SKILL_ALIASES
+        self.extractor = SpacySkillExtractor(self.aliases)
         self._lookup: dict[str, str] = {}
         for canonical, variants in self.aliases.items():
             self._lookup[_normalize_key(canonical)] = canonical
@@ -62,7 +72,15 @@ class SkillNormalizer:
         if not text:
             return []
 
-        matches_by_canonical: dict[str, SkillMatch] = {}
+        matches_by_canonical: dict[str, SkillMatch] = {
+            item.canonical: SkillMatch(
+                canonical=item.canonical,
+                original=item.original,
+                start=item.start,
+                end=item.end,
+            )
+            for item in self.extractor.extract(text)
+        }
         for match in self._pattern.finditer(text):
             original = match.group(0)
             canonical = self.normalize_term(original)
