@@ -1,0 +1,10 @@
+Django>=5.2,<5.3
+django-cors-headers>=4.7,<5
+elasticsearch>=8.15,<9
+neo4j>=5.28,<6
+psycopg[binary]>=3.2,<4
+python-dotenv>=1.0,<2
+spacy>=3.8.14,<4
+strawberry-graphql-django>=0.82,<1
+pytest>=8.3,<9
+pytest-django>=4.9,<5
