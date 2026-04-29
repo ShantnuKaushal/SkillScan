@@ -11,16 +11,17 @@ class SkillNormalizerTests(TestCase):
         self.assertEqual(normalizer.normalize_term("react.js"), "React")
         self.assertEqual(normalizer.normalize_term("nodejs"), "Node.js")
         self.assertEqual(normalizer.normalize_term("postgres"), "PostgreSQL")
+        self.assertEqual(normalizer.normalize_term("java"), "Java")
 
     def test_extracts_unique_canonical_skills_from_description(self):
         normalizer = SkillNormalizer()
 
         matches = normalizer.extract_skills(
-            "We build Python services with Django REST APIs, Postgres, Docker, and React.js."
+            "We build Java and Python services with Django REST APIs, Postgres, Docker, and React.js."
         )
 
         labels = [match.canonical for match in matches]
-        self.assertEqual(labels, ["Python", "Django", "PostgreSQL", "Docker", "React"])
+        self.assertEqual(labels, ["Java", "Python", "Django", "PostgreSQL", "Docker", "React"])
 
     def test_reports_original_phrase_for_each_normalized_skill(self):
         normalizer = SkillNormalizer()

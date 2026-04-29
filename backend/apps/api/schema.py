@@ -8,6 +8,7 @@ from django.db.models import Q
 from apps.graph.neo4j_client import SkillGraph, local_related_skills, local_skill_graph
 from apps.jobs.models import JobPosting
 from apps.search.elastic import JobSearchIndex
+from apps.skills.services.normalization import SkillNormalizer
 
 
 @strawberry.type
@@ -70,6 +71,13 @@ class SearchPayload:
     graph: GraphPayload
 
 
+@strawberry.type
+class SkillGraphPayload:
+    selected_skill: str
+    related_skills: list[RelatedSkillType]
+    graph: GraphPayload
+
+
 @dataclass(frozen=True)
 class SearchResult:
     total: int
@@ -110,7 +118,7 @@ class Query:
             _to_job_result(job, corrected_query, search_result.score_by_external_id.get(job.external_id, 1.0))
             for job in search_result.jobs
         ]
-        selected_skill = skill or _first_skill_from_jobs(jobs) or ""
+        selected_skill = _selected_skill_for_search(skill, corrected_query, jobs)
         related_items, graph_payload = _graph_context(selected_skill)
 
         return SearchPayload(
@@ -119,6 +127,30 @@ class Query:
             selected_skill=selected_skill,
             total=search_result.total,
             jobs=jobs,
+            related_skills=[RelatedSkillType(name=item["name"], count=item["count"]) for item in related_items],
+            graph=GraphPayload(
+                nodes=[
+                    GraphNodeType(id=node["id"], label=node["label"], type=node["type"])
+                    for node in graph_payload["nodes"]
+                ],
+                edges=[
+                    GraphEdgeType(
+                        source=edge["source"],
+                        target=edge["target"],
+                        type=edge["type"],
+                        weight=edge["weight"],
+                    )
+                    for edge in graph_payload["edges"]
+                ],
+            ),
+        )
+
+    @strawberry.field
+    def skill_graph(self, skill: str) -> SkillGraphPayload:
+        selected_skill = SkillNormalizer().normalize_term(skill) or skill.strip()
+        related_items, graph_payload = _graph_context(selected_skill)
+        return SkillGraphPayload(
+            selected_skill=selected_skill,
             related_skills=[RelatedSkillType(name=item["name"], count=item["count"]) for item in related_items],
             graph=GraphPayload(
                 nodes=[
@@ -272,3 +304,14 @@ def _first_skill_from_jobs(jobs: list[JobResultType]) -> str | None:
         if job.skills:
             return job.skills[0].name
     return None
+
+
+def _first_skill_from_query(query: str) -> str | None:
+    matches = SkillNormalizer().extract_skills(query)
+    return matches[0].canonical if matches else None
+
+
+def _selected_skill_for_search(skill: str | None, query: str, jobs: list[JobResultType]) -> str:
+    if not jobs:
+        return ""
+    return skill or _first_skill_from_query(query) or _first_skill_from_jobs(jobs) or ""

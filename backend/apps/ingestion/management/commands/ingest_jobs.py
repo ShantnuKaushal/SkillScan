@@ -141,7 +141,7 @@ class Command(BaseCommand):
                         "location": row.get("location", ""),
                         "work_type": row.get("formatted_work_type", "") or row.get("work_type", ""),
                         "experience_level": row.get("formatted_experience_level", ""),
-                        "remote_allowed": row.get("remote_allowed", "").strip() in {"1", "true", "True"},
+                        "remote_allowed": parse_remote_allowed(row.get("remote_allowed", "")),
                         "posting_url": row.get("job_posting_url", ""),
                         "listed_time": row.get("listed_time", ""),
                         "raw_payload": row,
@@ -168,3 +168,7 @@ def _normalize_external_id(value: str) -> str:
     if cleaned.endswith(".0"):
         cleaned = cleaned[:-2]
     return cleaned
+
+
+def parse_remote_allowed(value: str) -> bool:
+    return (value or "").strip().casefold() in {"1", "1.0", "true", "yes"}

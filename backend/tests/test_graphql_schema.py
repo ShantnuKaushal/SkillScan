@@ -147,6 +147,91 @@ class GraphQLSchemaTests(TestCase):
         self.assertIn("OFTEN_WITH", [edge["type"] for edge in payload["graph"]["edges"]])
         self.assertTrue(all(node["id"].startswith("skill:") for node in payload["graph"]["nodes"]))
 
+    def test_search_jobs_uses_query_skill_as_graph_focus_before_first_result_skill(self):
+        search_index = Mock()
+        search_index.search.return_value = (
+            1,
+            [{"id": "job-1", "score": 9.0}],
+        )
+        graph = Mock()
+        graph.related_skills.return_value = [{"name": "Spring", "count": 1}]
+        graph.skill_graph.return_value = {
+            "nodes": [{"id": "skill:Java", "label": "Java", "type": "skill"}],
+            "edges": [],
+        }
+
+        with patch("apps.api.schema.JobSearchIndex", return_value=search_index), patch(
+            "apps.api.schema.SkillGraph", return_value=graph
+        ):
+            result = schema.execute_sync(
+                """
+                {
+                  searchJobs(query: "java", limit: 3) {
+                    selectedSkill
+                    relatedSkills {
+                      name
+                      count
+                    }
+                  }
+                }
+                """
+            )
+
+        self.assertIsNone(result.errors)
+        payload = result.data["searchJobs"]
+        self.assertEqual(payload["selectedSkill"], "Java")
+        self.assertEqual(payload["relatedSkills"], [{"name": "Spring", "count": 1}])
+        graph.related_skills.assert_called_once_with("Java")
+        graph.skill_graph.assert_called_once_with("Java")
+
+    def test_skill_graph_returns_graph_context_without_job_search(self):
+        graph = Mock()
+        graph.related_skills.return_value = [{"name": "Python", "count": 3}]
+        graph.skill_graph.return_value = {
+            "nodes": [
+                {"id": "skill:AWS", "label": "AWS", "type": "skill"},
+                {"id": "skill:Python", "label": "Python", "type": "skill"},
+            ],
+            "edges": [
+                {"source": "skill:AWS", "target": "skill:Python", "type": "OFTEN_WITH", "weight": 3},
+            ],
+        }
+
+        with patch("apps.api.schema.JobSearchIndex") as search_index, patch(
+            "apps.api.schema.SkillGraph", return_value=graph
+        ):
+            result = schema.execute_sync(
+                """
+                {
+                  skillGraph(skill: "aws") {
+                    selectedSkill
+                    relatedSkills {
+                      name
+                      count
+                    }
+                    graph {
+                      nodes {
+                        id
+                      }
+                      edges {
+                        weight
+                      }
+                    }
+                  }
+                }
+                """
+            )
+
+        self.assertIsNone(result.errors)
+        payload = result.data["skillGraph"]
+        self.assertEqual(payload["selectedSkill"], "AWS")
+        self.assertEqual(payload["relatedSkills"], [{"name": "Python", "count": 3}])
+        self.assertEqual(payload["graph"]["nodes"][0]["id"], "skill:AWS")
+        search_index.assert_not_called()
+        graph.related_skills.assert_called_once_with("AWS")
+        graph.skill_graph.assert_called_once_with("AWS")
+        graph.close.assert_called_once()
+
     def test_search_jobs_returns_empty_payload_when_no_jobs_exist(self):
         JobSkill.objects.all().delete()
         CanonicalSkill.objects.all().delete()

@@ -21,6 +21,7 @@ DEFAULT_SKILL_ALIASES: dict[str, tuple[str, ...]] = {
     "Elasticsearch": ("elasticsearch", "elastic search", "elastic"),
     "FastAPI": ("fastapi", "fast api"),
     "GraphQL": ("graphql", "graph ql"),
+    "Java": ("java", "core java"),
     "JavaScript": ("javascript", "ecmascript"),
     "Kubernetes": ("kubernetes", "k8s"),
     "Neo4j": ("neo4j", "neo 4j", "cypher"),
