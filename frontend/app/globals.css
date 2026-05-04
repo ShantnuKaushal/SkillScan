@@ -12,13 +12,18 @@
 
 body {
   margin: 0;
-  background: #f4f7f4;
-  color: #1d211f;
-  font-family: "Inter", "Aptos", "Helvetica Neue", sans-serif;
+  background: #f4f2ed;
+  color: #25221f;
+  font-family: "Aptos", "Helvetica Neue", "Calibri", sans-serif;
+  text-rendering: optimizeLegibility;
 }
 
 button,
 input,
 select {
   font: inherit;
+}
+
+::selection {
+  background: rgba(162, 75, 42, 0.18);
 }

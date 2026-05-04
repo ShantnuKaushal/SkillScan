@@ -13,6 +13,7 @@ node_modules/
 out/
 dist/
 coverage/
+frontend/.next-dev-*.log
 
 .env
 .env.*

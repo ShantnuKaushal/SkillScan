@@ -1,3 +1,5 @@
+name: skillscan
+
 services:
   backend:
     build:
