@@ -5,12 +5,12 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#20201d",
-        paper: "#f6f4ef",
-        line: "#ded9cf",
-        skill: "#138a63",
-        job: "#2f68b2",
-        company: "#b7791f"
+        ink: "#1d211f",
+        paper: "#f4f7f4",
+        line: "#d8e1d8",
+        skill: "#0b8067",
+        job: "#3d6476",
+        company: "#806238"
       }
     }
   },

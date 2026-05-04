@@ -260,18 +260,20 @@ export default function Home() {
   }
 
   return (
-    <main className="flex h-screen flex-col overflow-hidden bg-paper text-ink">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-line bg-white px-5">
+    <main className="flex h-screen flex-col overflow-hidden bg-[linear-gradient(135deg,#f7faf6_0%,#edf4ee_48%,#f8f5ec_100%)] text-ink">
+      <header className="flex h-16 shrink-0 items-center justify-between border-b border-white/70 bg-white/75 px-6 backdrop-blur">
         <div className="flex items-center gap-2">
-          <Network size={18} />
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/80 bg-white/80 text-skill shadow-sm">
+            <Network size={18} />
+          </span>
           <div className="text-base font-semibold">SkillScan</div>
         </div>
-        <div className="text-sm text-neutral-500">Career-market skill graph</div>
+        <div className="text-sm text-neutral-500">Lightweight skill market lab</div>
       </header>
 
-      <section className="shrink-0 border-b border-line bg-white px-5 py-4">
-        <form onSubmit={handleSubmit} className="grid gap-3 lg:grid-cols-[minmax(360px,1fr)_150px_116px]">
-          <label className="flex h-10 items-center gap-3 rounded-md border border-line bg-white px-3">
+      <section className="shrink-0 border-b border-white/70 bg-white/45 px-6 py-5 backdrop-blur">
+        <form onSubmit={handleSubmit} className="grid gap-3 rounded-2xl border border-white/80 bg-white/70 p-2 shadow-sm backdrop-blur lg:grid-cols-[minmax(360px,1fr)_150px_116px]">
+          <label className="flex h-11 items-center gap-3 rounded-xl border border-transparent bg-white/80 px-3">
             <Search size={17} className="text-neutral-500" />
             <input
               className="w-full bg-transparent text-sm outline-none"
@@ -282,7 +284,7 @@ export default function Home() {
             />
           </label>
           <select
-            className="h-10 rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-neutral-500"
+            className="h-11 rounded-xl border border-line bg-white/80 px-3 text-sm outline-none focus:border-neutral-500"
             value={searchInput.remote}
             onChange={(event) => updateInput("remote", event.target.value as SearchInput["remote"])}
             aria-label="Work arrangement filter"
@@ -293,7 +295,7 @@ export default function Home() {
           </select>
           <button
             type="submit"
-            className="flex h-10 items-center justify-center gap-2 rounded-md bg-ink px-4 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex h-11 items-center justify-center gap-2 rounded-xl bg-ink px-4 text-sm font-medium text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
             disabled={loading}
             data-testid="career-map-submit"
           >
@@ -328,8 +330,8 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="grid min-h-0 flex-1 overflow-hidden grid-cols-1 lg:grid-cols-[minmax(320px,0.95fr)_minmax(460px,1.25fr)_minmax(260px,0.7fr)]">
-        <section className="flex min-h-0 flex-col border-r border-line bg-[#fbfaf7]">
+      <section className="grid min-h-0 flex-1 gap-4 overflow-hidden p-4 grid-cols-1 lg:grid-cols-[minmax(320px,0.9fr)_minmax(500px,1.3fr)_minmax(280px,0.78fr)]">
+        <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-white/80 bg-white/65 shadow-sm backdrop-blur">
           <PanelHeader
             icon={<BriefcaseBusiness size={17} />}
             title="Matching Jobs"
@@ -372,7 +374,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="flex min-h-0 flex-col border-r border-line bg-[#f8f7f2]">
+        <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-white/80 bg-white/55 shadow-sm backdrop-blur">
           <PanelHeader
             icon={<Network size={17} />}
             title="Market Map"
@@ -390,7 +392,7 @@ export default function Home() {
           </div>
         </section>
 
-        <aside className="flex min-h-0 flex-col bg-white">
+        <aside className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-white/80 bg-white/65 shadow-sm backdrop-blur">
           <PanelHeader
             icon={<Target size={17} />}
             title="Skill Details"
@@ -421,7 +423,7 @@ function PanelHeader({
   detail: string;
 }) {
   return (
-    <div className="flex shrink-0 items-center justify-between gap-4 border-b border-line bg-white px-4 py-3">
+    <div className="flex shrink-0 items-center justify-between gap-4 border-b border-white/70 bg-white/50 px-4 py-3 backdrop-blur">
       <div className="flex items-center gap-2">
         <span className="text-neutral-600">{icon}</span>
         <h2 className="font-semibold">{title}</h2>
@@ -448,7 +450,7 @@ function SelectedSkillsSection({
           {selectedSkills.map((skill) => (
             <button
               key={skill}
-              className="flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800"
+              className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50/80 px-2 py-1 text-xs font-medium text-emerald-800"
               onClick={() => onRemove(skill)}
             >
               {skill}
@@ -486,8 +488,8 @@ function RecommendationsSection({
           {visibleRecommendations.map((skill) => (
             <button
               key={skill.name}
-              className={`w-full rounded-md border bg-white p-3 text-left transition-colors ${
-                selectedKeys.has(normalizeSkillKey(skill.name)) ? "border-emerald-300 bg-emerald-50" : "border-line hover:border-neutral-400"
+              className={`w-full rounded-xl border p-3 text-left shadow-sm transition-colors ${
+                selectedKeys.has(normalizeSkillKey(skill.name)) ? "border-emerald-300 bg-emerald-50/90" : "border-white/80 bg-white/70 hover:border-neutral-400"
               }`}
               onClick={() => onSelect(skill.name)}
             >
@@ -525,13 +527,13 @@ function JobCard({
 }) {
   return (
     <article
-      className={`relative rounded-md border bg-white transition-colors ${
-        selected ? "border-ink" : "border-line hover:border-neutral-400"
+      className={`relative rounded-xl border bg-white/78 shadow-sm backdrop-blur transition-colors ${
+        selected ? "border-skill ring-2 ring-emerald-100" : "border-white/80 hover:border-neutral-400"
       }`}
     >
       {job.postingUrl ? (
         <a
-          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-md border border-line bg-white text-neutral-600 hover:border-neutral-400 hover:text-ink"
+          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-lg border border-white/80 bg-white/80 text-neutral-600 hover:border-neutral-400 hover:text-ink"
           href={job.postingUrl}
           target="_blank"
           rel="noreferrer"
@@ -594,7 +596,7 @@ function SkillMap({
   }
 
   return (
-    <div className="relative h-full min-h-[520px] overflow-hidden bg-[#f8f7f2]">
+    <div className="relative h-full min-h-[540px] overflow-hidden bg-[linear-gradient(180deg,rgba(255,255,255,0.72),rgba(247,251,247,0.42))]">
       <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         {positionedNodes.map((node) => {
           const isSelected = selectedKeys.has(normalizeSkillKey(node.label));
@@ -605,14 +607,14 @@ function SkillMap({
               y1="50"
               x2={node.left}
               y2={node.top}
-              stroke={isSelected ? "#12835d" : "#c9c3b8"}
-              strokeWidth={isSelected ? 0.85 : 0.45}
+              stroke={isSelected ? "#0b8067" : "#c7d2c7"}
+              strokeWidth={isSelected ? 0.78 : 0.34}
             />
           );
         })}
       </svg>
 
-      <div className="absolute left-1/2 top-1/2 z-10 w-[148px] -translate-x-1/2 -translate-y-1/2 rounded-md border border-ink bg-white p-3 text-center">
+      <div className="absolute left-1/2 top-1/2 z-10 w-[164px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/90 bg-white/80 p-4 text-center shadow-md backdrop-blur">
         <div className="text-xs text-neutral-500">Market</div>
         <div className="mt-1 truncate text-sm font-semibold">{query || "Search"}</div>
       </div>
@@ -622,10 +624,10 @@ function SkillMap({
         return (
           <button
             key={node.id}
-            className={`absolute z-10 w-[128px] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-white px-3 py-2 text-left text-sm transition-colors ${
+            className={`absolute z-10 w-[132px] -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-white/80 px-3 py-2 text-left text-sm shadow-sm backdrop-blur transition-colors ${
               isSelected
-                ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-                : "border-line hover:border-neutral-400"
+                ? "border-emerald-300 bg-emerald-50/95 text-emerald-900 ring-2 ring-emerald-100"
+                : "border-white/80 hover:border-neutral-400"
             }`}
             style={{ left: `${node.left}%`, top: `${node.top}%` }}
             onClick={() => onToggleSelected(node.label)}
