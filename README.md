@@ -120,5 +120,8 @@ Stop the backend stack:
 ```powershell
 docker compose down
 ```
+## Market Map Preview
 
+A quick look at SkillScan’s presentation-focused workspace, showing the career search flow, matching job results, and interactive skill graph used to explore role-specific technology demand.
+<img width="2560" height="1440" alt="skillscan-poster" src="https://github.com/user-attachments/assets/392f1fef-880d-48cc-b08a-ad46d06e06b5" />
 
