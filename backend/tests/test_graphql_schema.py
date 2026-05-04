@@ -232,6 +232,166 @@ class GraphQLSchemaTests(TestCase):
         graph.skill_graph.assert_called_once_with("AWS")
         graph.close.assert_called_once()
 
+    def test_career_map_ranks_related_skills_by_example_jobs(self):
+        company = Company.objects.get(external_id="stripe")
+        job_two = JobPosting.objects.create(
+            external_id="job-2",
+            company=company,
+            title="Platform Engineer",
+            description="Build Python services with Docker and AWS.",
+            location="New York",
+            remote_allowed=False,
+        )
+        job_three = JobPosting.objects.create(
+            external_id="job-3",
+            company=company,
+            title="Backend API Engineer",
+            description="Build Python APIs with Docker.",
+            location="Remote",
+            remote_allowed=True,
+        )
+        job_four = JobPosting.objects.create(
+            external_id="job-4",
+            company=company,
+            title="Cloud Engineer",
+            description="Build AWS infrastructure.",
+            location="Remote",
+            remote_allowed=True,
+        )
+        docker = CanonicalSkill.objects.create(name="Docker")
+        aws = CanonicalSkill.objects.create(name="AWS")
+        JobSkill.objects.create(job=job_two, skill=CanonicalSkill.objects.get(name="Python"), original_phrase="Python")
+        JobSkill.objects.create(job=job_two, skill=docker, original_phrase="Docker")
+        JobSkill.objects.create(job=job_two, skill=aws, original_phrase="AWS")
+        JobSkill.objects.create(job=job_three, skill=CanonicalSkill.objects.get(name="Python"), original_phrase="Python")
+        JobSkill.objects.create(job=job_three, skill=docker, original_phrase="Docker")
+        JobSkill.objects.create(job=job_four, skill=aws, original_phrase="AWS")
+
+        search_index = Mock()
+        search_index.search.return_value = (
+            4,
+            [
+                {"id": "job-1", "score": 12.5},
+                {"id": "job-2", "score": 9.0},
+                {"id": "job-3", "score": 8.0},
+                {"id": "job-4", "score": 7.0},
+            ],
+        )
+
+        with patch("apps.api.schema.JobSearchIndex", return_value=search_index), patch(
+            "apps.api.schema.SkillGraph", side_effect=RuntimeError("graph unavailable")
+        ):
+            result = schema.execute_sync(
+                """
+                {
+                  careerMap(query: "backend engineer", selectedSkills: ["Python"], limit: 5) {
+                    query
+                    correctedQuery
+                    total
+                    selectedSkills
+                    marketSkills {
+                      name
+                      count
+                      selected
+                    }
+                    recommendedSkills {
+                      name
+                      count
+                      exampleJobCount
+                      previewJobs {
+                        id
+                        title
+                      }
+                    }
+                    graph {
+                      nodes {
+                        id
+                        label
+                        type
+                      }
+                      edges {
+                        source
+                        target
+                        type
+                        weight
+                      }
+                    }
+                  }
+                }
+                """
+            )
+
+        self.assertIsNone(result.errors)
+        payload = result.data["careerMap"]
+        self.assertEqual(payload["query"], "backend engineer")
+        self.assertEqual(payload["correctedQuery"], "backend engineer")
+        self.assertEqual(payload["total"], 4)
+        self.assertEqual(payload["selectedSkills"], ["Python"])
+        market_skill_by_name = {skill["name"]: skill for skill in payload["marketSkills"]}
+        self.assertEqual(market_skill_by_name["Python"], {"name": "Python", "count": 3, "selected": True})
+        self.assertEqual(market_skill_by_name["Docker"], {"name": "Docker", "count": 2, "selected": False})
+        self.assertEqual(market_skill_by_name["AWS"], {"name": "AWS", "count": 2, "selected": False})
+        self.assertEqual(payload["recommendedSkills"][0]["name"], "Docker")
+        self.assertEqual(payload["recommendedSkills"][0]["count"], 2)
+        self.assertEqual(payload["recommendedSkills"][0]["exampleJobCount"], 2)
+        self.assertEqual(
+            [job["id"] for job in payload["recommendedSkills"][0]["previewJobs"]],
+            ["job-2", "job-3"],
+        )
+        aws_recommendation = next(skill for skill in payload["recommendedSkills"] if skill["name"] == "AWS")
+        self.assertEqual(aws_recommendation["count"], 1)
+        self.assertEqual(aws_recommendation["exampleJobCount"], 1)
+        self.assertIn("skill:Python", [node["id"] for node in payload["graph"]["nodes"]])
+        self.assertIn("skill:Docker", [node["id"] for node in payload["graph"]["nodes"]])
+        self.assertIn("SELECTED_WITH", [edge["type"] for edge in payload["graph"]["edges"]])
+        search_index.search.assert_called_once_with(
+            query="backend engineer",
+            remote=None,
+            skill=None,
+            location=None,
+            size=5,
+        )
+
+    def test_career_map_returns_empty_recommendations_when_no_jobs_match(self):
+        search_index = Mock()
+        search_index.search.return_value = (0, [])
+
+        with patch("apps.api.schema.JobSearchIndex", return_value=search_index):
+            result = schema.execute_sync(
+                """
+                {
+                  careerMap(query: "zzzzzz", selectedSkills: ["Python"], limit: 5) {
+                    total
+                    jobs {
+                      id
+                    }
+                    marketSkills {
+                      name
+                    }
+                    recommendedSkills {
+                      name
+                    }
+                    graph {
+                      nodes {
+                        id
+                      }
+                      edges {
+                        source
+                      }
+                    }
+                  }
+                }
+                """
+            )
+
+        self.assertIsNone(result.errors)
+        payload = result.data["careerMap"]
+        self.assertEqual(payload["total"], 0)
+        self.assertEqual(payload["jobs"], [])
+        self.assertEqual(payload["marketSkills"], [])
+        self.assertEqual(payload["recommendedSkills"], [])
+        self.assertEqual(payload["graph"], {"nodes": [], "edges": []})
+
     def test_search_jobs_returns_empty_payload_when_no_jobs_exist(self):
         JobSkill.objects.all().delete()
         CanonicalSkill.objects.all().delete()

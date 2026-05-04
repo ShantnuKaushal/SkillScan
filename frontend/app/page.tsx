@@ -1,16 +1,24 @@
 "use client";
 
-import { ExternalLink, RefreshCw, Search, SlidersHorizontal } from "lucide-react";
-import { FormEvent, useCallback, useMemo, useState } from "react";
+import {
+  BriefcaseBusiness,
+  Check,
+  ExternalLink,
+  Network,
+  RefreshCw,
+  Search,
+  Target,
+  X
+} from "lucide-react";
+import { FormEvent, ReactNode, useCallback, useMemo, useState } from "react";
 
 const GRAPHQL_URL = process.env.NEXT_PUBLIC_GRAPHQL_URL ?? "http://127.0.0.1:8001/graphql/";
 
-const SEARCH_JOBS_QUERY = `
-  query SearchJobs($query: String!, $remote: Boolean, $limit: Int) {
-    searchJobs(query: $query, remote: $remote, limit: $limit) {
+const CAREER_MAP_QUERY = `
+  query CareerMap($query: String!, $selectedSkills: [String!]!, $remote: Boolean, $limit: Int) {
+    careerMap(query: $query, selectedSkills: $selectedSkills, remote: $remote, limit: $limit) {
       query
       correctedQuery
-      selectedSkill
       total
       jobs {
         id
@@ -27,34 +35,28 @@ const SEARCH_JOBS_QUERY = `
           originalPhrase
         }
       }
-      relatedSkills {
+      marketSkills {
         name
         count
       }
-      graph {
-        nodes {
+      recommendedSkills {
+        name
+        count
+        previewJobs {
           id
-          label
-          type
+          title
+          company
+          location
+          remoteAllowed
+          workType
+          experienceLevel
+          descriptionSnippet
+          postingUrl
+          skills {
+            name
+            originalPhrase
+          }
         }
-        edges {
-          source
-          target
-          type
-          weight
-        }
-      }
-    }
-  }
-`;
-
-const SKILL_GRAPH_QUERY = `
-  query SkillGraph($skill: String!) {
-    skillGraph(skill: $skill) {
-      selectedSkill
-      relatedSkills {
-        name
-        count
       }
       graph {
         nodes {
@@ -91,9 +93,15 @@ type JobResult = {
   skills: Skill[];
 };
 
-type RelatedSkill = {
+type MarketSkill = {
   name: string;
   count: number;
+};
+
+type RecommendedSkill = {
+  name: string;
+  count: number;
+  previewJobs: JobResult[];
 };
 
 type GraphNode = {
@@ -109,25 +117,22 @@ type GraphEdge = {
   weight: number;
 };
 
-type SearchPayload = {
+type CareerMapPayload = {
   query: string;
   correctedQuery: string;
-  selectedSkill: string;
   total: number;
   jobs: JobResult[];
-  relatedSkills: RelatedSkill[];
+  marketSkills: MarketSkill[];
+  recommendedSkills: RecommendedSkill[];
   graph: {
     nodes: GraphNode[];
     edges: GraphEdge[];
   };
 };
 
-type GraphContext = Pick<SearchPayload, "selectedSkill" | "relatedSkills" | "graph">;
-
 type GraphQLResponse = {
   data?: {
-    searchJobs?: SearchPayload;
-    skillGraph?: GraphContext;
+    careerMap?: CareerMapPayload;
   };
   errors?: Array<{ message: string }>;
 };
@@ -137,7 +142,7 @@ type SearchInput = {
   remote: "any" | "true" | "false";
 };
 
-type PositionedSkill = RelatedSkill & {
+type PositionedNode = GraphNode & {
   left: number;
   top: number;
 };
@@ -149,136 +154,131 @@ const defaultSearch: SearchInput = {
 
 export default function Home() {
   const [searchInput, setSearchInput] = useState<SearchInput>(defaultSearch);
-  const [payload, setPayload] = useState<SearchPayload | null>(null);
-  const [graphContext, setGraphContext] = useState<GraphContext | null>(null);
+  const [payload, setPayload] = useState<CareerMapPayload | null>(null);
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const selectedJob = useMemo(() => {
+  const filteredJobs = useMemo(() => {
     if (!payload?.jobs.length) {
+      return [];
+    }
+    if (!selectedSkills.length) {
+      return payload.jobs;
+    }
+    return jobsMatchingSkills(payload.jobs, selectedSkills);
+  }, [payload, selectedSkills]);
+
+  const selectedJob = useMemo(() => {
+    if (!filteredJobs.length) {
       return null;
     }
-    return payload.jobs.find((job) => job.id === selectedJobId) ?? payload.jobs[0];
-  }, [payload, selectedJobId]);
+    return filteredJobs.find((job) => job.id === selectedJobId) ?? filteredJobs[0];
+  }, [filteredJobs, selectedJobId]);
 
-  const maxRelatedCount = useMemo(() => {
-    return Math.max(1, ...((graphContext?.relatedSkills ?? []).map((item) => item.count)));
-  }, [graphContext]);
+  const maxRelatedJobCount = useMemo(() => {
+    return Math.max(1, ...((payload?.recommendedSkills ?? []).map((skill) => skill.count)));
+  }, [payload]);
 
-  const runSearch = useCallback(async (nextInput?: Partial<SearchInput>) => {
-    const input = { ...searchInput, ...nextInput };
-    const trimmedQuery = input.query.trim();
-    if (!trimmedQuery) {
-      setError("Add a search term before running a search.");
-      setPayload(null);
-      setSelectedJobId(null);
-      return;
-    }
-
-    setSearchInput(input);
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch(GRAPHQL_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({
-          query: SEARCH_JOBS_QUERY,
-          variables: {
-            query: trimmedQuery,
-            remote: input.remote === "any" ? null : input.remote === "true",
-            limit: 12
-          }
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`GraphQL request failed with status ${response.status}.`);
+  const runCareerMap = useCallback(
+    async (nextInput?: Partial<SearchInput>, nextSelectedSkills?: string[]) => {
+      const input = { ...searchInput, ...nextInput };
+      const activeSelectedSkills = nextSelectedSkills ?? selectedSkills;
+      const trimmedQuery = input.query.trim();
+      if (!trimmedQuery) {
+        setError("Enter a role, skill, or keyword to map the market.");
+        setPayload(null);
+        setSelectedJobId(null);
+        return;
       }
 
-      const body = (await response.json()) as GraphQLResponse;
-      if (body.errors?.length) {
-        throw new Error(body.errors.map((item) => item.message).join(" "));
-      }
-      if (!body.data?.searchJobs) {
-        throw new Error("GraphQL response did not include search results.");
-      }
+      setSearchInput(input);
+      setSelectedSkills(activeSelectedSkills);
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await fetch(GRAPHQL_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({
+            query: CAREER_MAP_QUERY,
+            variables: {
+              query: trimmedQuery,
+              selectedSkills: activeSelectedSkills,
+              remote: input.remote === "any" ? null : input.remote === "true",
+              limit: 24
+            }
+          })
+        });
 
-      setPayload(body.data.searchJobs);
-      setGraphContext({
-        selectedSkill: body.data.searchJobs.selectedSkill,
-        relatedSkills: body.data.searchJobs.relatedSkills,
-        graph: body.data.searchJobs.graph
-      });
-      setSelectedJobId(body.data.searchJobs.jobs[0]?.id ?? null);
-    } catch (searchError) {
-      setError(searchError instanceof Error ? searchError.message : "Search failed.");
-      setPayload(null);
-      setGraphContext(null);
-      setSelectedJobId(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [searchInput]);
+        if (!response.ok) {
+          throw new Error(`GraphQL request failed with status ${response.status}.`);
+        }
+
+        const body = (await response.json()) as GraphQLResponse;
+        if (body.errors?.length) {
+          throw new Error(body.errors.map((item) => item.message).join(" "));
+        }
+        if (!body.data?.careerMap) {
+          throw new Error("GraphQL response did not include a career map.");
+        }
+
+        const nextPayload = body.data.careerMap;
+        const nextFilteredJobs = activeSelectedSkills.length
+          ? jobsMatchingSkills(nextPayload.jobs, activeSelectedSkills)
+          : nextPayload.jobs;
+        setPayload(nextPayload);
+        setSelectedJobId(nextFilteredJobs[0]?.id ?? null);
+      } catch (searchError) {
+        setError(searchError instanceof Error ? searchError.message : "Career map failed.");
+        setPayload(null);
+        setSelectedJobId(null);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [selectedSkills, searchInput]
+  );
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    void runSearch();
+    setSelectedSkills([]);
+    void runCareerMap(undefined, []);
   }
 
   function updateInput<K extends keyof SearchInput>(key: K, value: SearchInput[K]) {
     setSearchInput((current) => ({ ...current, [key]: value }));
   }
 
-  async function exploreSkill(skillName: string) {
-    try {
-      const response = await fetch(GRAPHQL_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({
-          query: SKILL_GRAPH_QUERY,
-          variables: { skill: skillName }
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`GraphQL request failed with status ${response.status}.`);
-      }
-
-      const body = (await response.json()) as GraphQLResponse;
-      if (body.errors?.length) {
-        throw new Error(body.errors.map((item) => item.message).join(" "));
-      }
-      if (!body.data?.skillGraph) {
-        throw new Error("GraphQL response did not include skill graph data.");
-      }
-
-      setGraphContext(body.data.skillGraph);
-    } catch (graphError) {
-      setError(graphError instanceof Error ? graphError.message : "Skill graph failed.");
-    }
+  function toggleSelectedSkill(skillName: string) {
+    const nextSelectedSkills = selectedSkills.some((skill) => sameSkill(skill, skillName))
+      ? selectedSkills.filter((skill) => !sameSkill(skill, skillName))
+      : [...selectedSkills, skillName];
+    void runCareerMap(undefined, nextSelectedSkills);
   }
 
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-paper text-ink">
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-line bg-white px-5">
-        <div className="text-base font-semibold">SkillScan</div>
-        <div className="text-sm text-neutral-500">Job search and skill discovery</div>
+        <div className="flex items-center gap-2">
+          <Network size={18} />
+          <div className="text-base font-semibold">SkillScan</div>
+        </div>
+        <div className="text-sm text-neutral-500">Career-market skill graph</div>
       </header>
 
       <section className="shrink-0 border-b border-line bg-white px-5 py-4">
-        <form onSubmit={handleSubmit} className="grid gap-3 lg:grid-cols-[minmax(360px,1fr)_150px_110px]">
+        <form onSubmit={handleSubmit} className="grid gap-3 lg:grid-cols-[minmax(360px,1fr)_150px_116px]">
           <label className="flex h-10 items-center gap-3 rounded-md border border-line bg-white px-3">
             <Search size={17} className="text-neutral-500" />
             <input
               className="w-full bg-transparent text-sm outline-none"
               value={searchInput.query}
               onChange={(event) => updateInput("query", event.target.value)}
-              aria-label="Search jobs"
-              placeholder="Search by job title, company, keyword, or technology"
+              aria-label="Search career market"
+              placeholder="Search a role, skill, company, or technology"
             />
           </label>
           <select
@@ -295,273 +295,365 @@ export default function Home() {
             type="submit"
             className="flex h-10 items-center justify-center gap-2 rounded-md bg-ink px-4 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
             disabled={loading}
+            data-testid="career-map-submit"
           >
-            {loading ? <RefreshCw size={16} className="animate-spin" /> : <SlidersHorizontal size={16} />}
-            Search
+            {loading ? <RefreshCw size={16} className="animate-spin" /> : <Target size={16} />}
+            Map
           </button>
         </form>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-neutral-600">
           {payload ? (
             <span>
-              Showing {payload.jobs.length} of {payload.total} for{" "}
+              {payload.total} matching jobs for{" "}
               <strong className="font-semibold text-ink">{payload.correctedQuery || payload.query}</strong>
             </span>
           ) : (
-            <span>Search jobs from the loaded Kaggle dataset.</span>
+            <span>Map the skills that show up across matching job postings.</span>
           )}
           {payload && payload.query !== payload.correctedQuery ? (
             <span className="rounded-md border border-line px-2 py-1 text-xs">
               corrected from {payload.query}
             </span>
           ) : null}
+          {payload ? (
+            <span className="rounded-md border border-line px-2 py-1 text-xs">
+              {payload.jobs.length} jobs analyzed
+            </span>
+          ) : null}
+          {selectedSkills.length ? (
+            <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
+              {selectedSkills.length} selected
+            </span>
+          ) : null}
         </div>
       </section>
 
-      <section className="grid min-h-0 flex-1 overflow-hidden grid-cols-1 lg:grid-cols-[390px_minmax(520px,1fr)_360px]">
+      <section className="grid min-h-0 flex-1 overflow-hidden grid-cols-1 lg:grid-cols-[minmax(320px,0.95fr)_minmax(460px,1.25fr)_minmax(260px,0.7fr)]">
         <section className="flex min-h-0 flex-col border-r border-line bg-[#fbfaf7]">
-          <div className="shrink-0 border-b border-line px-4 py-3">
-            <h1 className="text-base font-semibold">Jobs</h1>
-            <p className="mt-1 text-sm text-neutral-600">Openings that match the search.</p>
-          </div>
+          <PanelHeader
+            icon={<BriefcaseBusiness size={17} />}
+            title="Matching Jobs"
+            detail={
+              payload
+                ? selectedSkills.length
+                  ? `${filteredJobs.length} jobs match ${selectedSkills.join(", ")}`
+                  : `${payload.jobs.length} jobs analyzed from ${payload.total} matches`
+                : "Search results"
+            }
+          />
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             {error ? <StatusMessage title="Search failed" body={error} /> : null}
-            {loading ? <StatusMessage title="Searching" body="Fetching jobs, skills, and graph context." /> : null}
+            {loading ? <StatusMessage title="Mapping market" body="Fetching jobs and skill counts." /> : null}
             {!loading && !error && payload?.jobs.length === 0 ? (
               <StatusMessage
                 title="No jobs returned"
-                body="If this is a fresh database, run docker compose exec backend python manage.py bootstrap_demo --limit 1000."
+                body="Try a broader role or load the local demo dataset."
+              />
+            ) : null}
+            {!loading && !error && payload && payload.jobs.length > 0 && filteredJobs.length === 0 ? (
+              <StatusMessage
+                title="No jobs match selected skills"
+                body="Remove a selected skill or choose another skill from the map."
               />
             ) : null}
             {!loading && !error && !payload ? (
-              <StatusMessage title="Start with a search" body="Try a role, company, keyword, or skill like Java, Python, SQL, React, or AWS." />
+              <StatusMessage title="Start with a market" body="Try backend engineer, cloud, React, Java, Python, SQL, or AWS." />
             ) : null}
             <div className="space-y-3">
-              {payload?.jobs.map((job) => (
-                <button
+              {filteredJobs.map((job) => (
+                <JobCard
                   key={job.id}
+                  job={job}
+                  selected={selectedJob?.id === job.id}
                   onClick={() => setSelectedJobId(job.id)}
-                  className={`w-full rounded-md border bg-white p-4 text-left transition-colors ${
-                    selectedJob?.id === job.id ? "border-ink" : "border-line hover:border-neutral-400"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="font-semibold leading-5">{job.title}</div>
-                      <div className="mt-1 text-sm text-neutral-600">
-                        {job.company} - {job.location || "Location unavailable"}
-                      </div>
-                    </div>
-                  </div>
-                  <p className="mt-3 text-sm leading-5 text-neutral-700">{job.descriptionSnippet}</p>
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {job.skills.slice(0, 5).map((item) => (
-                      <span key={item.name} className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
-                        {item.name}
-                      </span>
-                    ))}
-                  </div>
-                </button>
+                />
               ))}
             </div>
           </div>
         </section>
 
-        <section className="flex min-h-0 flex-col border-r border-line bg-[#f9f8f4]">
-          <div className="shrink-0 border-b border-line bg-white px-4 py-3">
-            <div>
-              <h2 className="font-semibold">Skill Discovery</h2>
-              <p className="text-sm text-neutral-600">
-                {graphContext?.selectedSkill
-                  ? `Skills commonly found with ${graphContext.selectedSkill}. Counts are jobs that mention both skills.`
-                  : "Run a search to see related skills."}
-              </p>
-            </div>
-          </div>
+        <section className="flex min-h-0 flex-col border-r border-line bg-[#f8f7f2]">
+          <PanelHeader
+            icon={<Network size={17} />}
+            title="Market Map"
+            detail={payload ? "Click a skill to select it" : "Skill graph"}
+          />
           <div className="min-h-0 flex-1">
             <SkillMap
-              selectedSkill={graphContext?.selectedSkill ?? ""}
-              relatedSkills={graphContext?.relatedSkills ?? []}
-              maxRelatedCount={maxRelatedCount}
-              onSelectSkill={exploreSkill}
+              query={payload?.correctedQuery || searchInput.query}
+              marketSkills={payload?.marketSkills ?? []}
+              graph={payload?.graph ?? { nodes: [], edges: [] }}
+              selectedSkills={selectedSkills}
+              loading={loading}
+              onToggleSelected={toggleSelectedSkill}
             />
           </div>
         </section>
 
         <aside className="flex min-h-0 flex-col bg-white">
-          <div className="shrink-0 border-b border-line p-4">
-            <div>
-              <h2 className="font-semibold">Job Detail</h2>
-              <p className="text-sm text-neutral-600">Selected search result.</p>
-            </div>
+          <PanelHeader
+            icon={<Target size={17} />}
+            title="Skill Details"
+            detail={selectedSkills.length ? selectedSkills.join(", ") : "Select a skill"}
+          />
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            <SelectedSkillsSection selectedSkills={selectedSkills} onRemove={toggleSelectedSkill} />
+            <RecommendationsSection
+              recommendations={payload?.recommendedSkills ?? []}
+              selectedSkills={selectedSkills}
+              maxRelatedJobCount={maxRelatedJobCount}
+              onSelect={toggleSelectedSkill}
+            />
           </div>
-          {selectedJob ? (
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <div className="text-lg font-semibold leading-6">{selectedJob.title}</div>
-              <div className="mt-1 text-sm text-neutral-600">
-                {selectedJob.company} - {selectedJob.location || "Location unavailable"}
-              </div>
-              <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-                <InfoCell label="Remote" value={selectedJob.remoteAllowed ? "Yes" : "No"} />
-                <InfoCell label="Work type" value={selectedJob.workType || "Unknown"} />
-                <InfoCell label="Level" value={selectedJob.experienceLevel || "Unknown"} />
-              </div>
-
-              <div className="mt-5 text-sm font-semibold">Description</div>
-              <p className="mt-2 text-sm leading-5 text-neutral-700">{selectedJob.descriptionSnippet}</p>
-
-              <div className="mt-5 text-sm font-semibold">Skills found in this posting</div>
-              <p className="mt-1 text-sm text-neutral-600">
-                Saved skill on the left, original phrase from the posting on the right.
-              </p>
-              <div className="mt-2 divide-y divide-line rounded-md border border-line">
-                {selectedJob.skills.length ? (
-                  selectedJob.skills.map((item) => (
-                    <div key={item.name} className="grid grid-cols-[1fr_1fr] gap-3 px-3 py-2 text-sm">
-                      <span className="font-medium">{item.name}</span>
-                      <span className="text-right text-neutral-500">{item.originalPhrase || "description"}</span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="px-3 py-2 text-sm text-neutral-600">No known skills were found in this posting.</div>
-                )}
-              </div>
-
-              {selectedJob.postingUrl ? (
-                <a
-                  className="mt-5 flex h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-medium text-white"
-                  href={selectedJob.postingUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  View posting
-                  <ExternalLink size={15} />
-                </a>
-              ) : null}
-            </div>
-          ) : (
-            <div className="p-4">
-              <StatusMessage title="No job selected" body="Choose a result to inspect its normalized skills and graph context." />
-            </div>
-          )}
         </aside>
       </section>
     </main>
   );
 }
 
-function SkillMap({
-  selectedSkill,
-  relatedSkills,
-  maxRelatedCount,
-  onSelectSkill
+function PanelHeader({
+  icon,
+  title,
+  detail
 }: {
-  selectedSkill: string;
-  relatedSkills: RelatedSkill[];
-  maxRelatedCount: number;
-  onSelectSkill: (skillName: string) => void | Promise<void>;
+  icon: ReactNode;
+  title: string;
+  detail: string;
 }) {
-  const positionedSkills = useMemo(() => positionSkills(relatedSkills.slice(0, 8)), [relatedSkills]);
+  return (
+    <div className="flex shrink-0 items-center justify-between gap-4 border-b border-line bg-white px-4 py-3">
+      <div className="flex items-center gap-2">
+        <span className="text-neutral-600">{icon}</span>
+        <h2 className="font-semibold">{title}</h2>
+      </div>
+      <div className="truncate text-sm text-neutral-500">{detail}</div>
+    </div>
+  );
+}
 
-  if (!selectedSkill) {
+function SelectedSkillsSection({
+  selectedSkills,
+  onRemove
+}: {
+  selectedSkills: string[];
+  onRemove: (skillName: string) => void;
+}) {
+  return (
+    <section className="border-b border-line pb-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold">Selected Skills</h3>
+      </div>
+      {selectedSkills.length ? (
+        <div className="flex flex-wrap gap-2">
+          {selectedSkills.map((skill) => (
+            <button
+              key={skill}
+              className="flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800"
+              onClick={() => onRemove(skill)}
+            >
+              {skill}
+              <X size={12} />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm leading-5 text-neutral-600">No skill selected.</p>
+      )}
+    </section>
+  );
+}
+
+function RecommendationsSection({
+  recommendations,
+  selectedSkills,
+  maxRelatedJobCount,
+  onSelect
+}: {
+  recommendations: RecommendedSkill[];
+  selectedSkills: string[];
+  maxRelatedJobCount: number;
+  onSelect: (skillName: string) => void;
+}) {
+  const visibleRecommendations = recommendations.slice(0, 6);
+  const selectedKeys = useMemo(() => new Set(selectedSkills.map((skill) => normalizeSkillKey(skill))), [selectedSkills]);
+  return (
+    <section className="py-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold">Related Skills</h3>
+      </div>
+      {visibleRecommendations.length ? (
+        <div className="space-y-2">
+          {visibleRecommendations.map((skill) => (
+            <button
+              key={skill.name}
+              className={`w-full rounded-md border bg-white p-3 text-left transition-colors ${
+                selectedKeys.has(normalizeSkillKey(skill.name)) ? "border-emerald-300 bg-emerald-50" : "border-line hover:border-neutral-400"
+              }`}
+              onClick={() => onSelect(skill.name)}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-1.5 font-medium">
+                  {selectedKeys.has(normalizeSkillKey(skill.name)) ? <Check size={13} /> : null}
+                  {skill.name}
+                </span>
+                <span className="text-sm text-neutral-600">{skill.count} jobs</span>
+              </div>
+              <div className="mt-2 h-1.5 rounded bg-neutral-100">
+                <div
+                  className="h-1.5 rounded bg-skill"
+                  style={{ width: `${Math.max(8, Math.round((skill.count / maxRelatedJobCount) * 100))}%` }}
+                />
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm leading-5 text-neutral-600">Related skills appear after SkillScan finds matching jobs.</p>
+      )}
+    </section>
+  );
+}
+
+function JobCard({
+  job,
+  selected,
+  onClick
+}: {
+  job: JobResult;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <article
+      className={`relative rounded-md border bg-white transition-colors ${
+        selected ? "border-ink" : "border-line hover:border-neutral-400"
+      }`}
+    >
+      {job.postingUrl ? (
+        <a
+          className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-md border border-line bg-white text-neutral-600 hover:border-neutral-400 hover:text-ink"
+          href={job.postingUrl}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`Open posting for ${job.title}`}
+          title="Open posting"
+        >
+          <ExternalLink size={15} />
+        </a>
+      ) : null}
+      <button onClick={onClick} className="w-full p-4 pr-14 text-left">
+        <div className="font-semibold leading-5">{job.title}</div>
+        <div className="mt-1 text-sm text-neutral-600">
+          {job.company} - {job.location || "Location unavailable"}
+        </div>
+        <p className="mt-3 text-sm leading-5 text-neutral-700">{job.descriptionSnippet}</p>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {job.skills.slice(0, 5).map((skill) => (
+            <span key={skill.name} className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
+              {skill.name}
+            </span>
+          ))}
+        </div>
+      </button>
+    </article>
+  );
+}
+
+function SkillMap({
+  query,
+  marketSkills,
+  graph,
+  selectedSkills,
+  loading,
+  onToggleSelected
+}: {
+  query: string;
+  marketSkills: MarketSkill[];
+  graph: CareerMapPayload["graph"];
+  selectedSkills: string[];
+  loading: boolean;
+  onToggleSelected: (skillName: string) => void;
+}) {
+  const positionedNodes = useMemo(() => positionNodes(graph.nodes), [graph.nodes]);
+  const selectedKeys = useMemo(() => new Set(selectedSkills.map((skill) => normalizeSkillKey(skill))), [selectedSkills]);
+
+  if (loading && !marketSkills.length) {
     return (
-      <div className="flex items-center justify-center p-6 text-center text-sm text-neutral-600">
-        Skill relationships appear after search returns normalized skills.
+      <div className="flex h-full items-center justify-center p-6 text-center text-sm text-neutral-600">
+        Building the market map.
       </div>
     );
   }
 
-  if (!positionedSkills.length) {
+  if (!marketSkills.length) {
     return (
-      <div className="relative h-full min-h-0 bg-[#f9f8f4]">
-        <button
-          className="absolute left-1/2 top-1/2 z-10 min-w-[120px] -translate-x-1/2 -translate-y-1/2 rounded-md border border-ink bg-white px-4 py-3 text-center text-sm font-semibold"
-          onClick={() => onSelectSkill(selectedSkill)}
-        >
-          {selectedSkill}
-        </button>
-        <div className="absolute left-1/2 top-[calc(50%+58px)] w-[280px] -translate-x-1/2 text-center text-sm leading-5 text-neutral-600">
-          No related skill relationships are loaded for {selectedSkill}.
-        </div>
+      <div className="flex h-full items-center justify-center p-6 text-center text-sm text-neutral-600">
+        Search results with normalized skills appear here.
       </div>
     );
   }
 
   return (
-    <div className="relative h-full min-h-0 overflow-hidden bg-[#f9f8f4]">
+    <div className="relative h-full min-h-[520px] overflow-hidden bg-[#f8f7f2]">
       <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-        {positionedSkills.map((item) => (
-          <line
-            key={item.name}
-            x1="50"
-            y1="50"
-            x2={item.left}
-            y2={item.top}
-            stroke="#c9c3b8"
-            strokeWidth={Math.max(0.35, Math.min(1.3, item.count / 40))}
-          />
-        ))}
+        {positionedNodes.map((node) => {
+          const isSelected = selectedKeys.has(normalizeSkillKey(node.label));
+          return (
+            <line
+              key={`market-${node.id}`}
+              x1="50"
+              y1="50"
+              x2={node.left}
+              y2={node.top}
+              stroke={isSelected ? "#12835d" : "#c9c3b8"}
+              strokeWidth={isSelected ? 0.85 : 0.45}
+            />
+          );
+        })}
       </svg>
 
-      <button
-        className="absolute left-1/2 top-1/2 z-10 min-w-[120px] -translate-x-1/2 -translate-y-1/2 rounded-md border border-ink bg-white px-4 py-3 text-center text-sm font-semibold"
-        onClick={() => onSelectSkill(selectedSkill)}
-      >
-        {selectedSkill}
-      </button>
-
-      {positionedSkills.map((item) => (
-        <button
-          key={item.name}
-          className="absolute z-10 min-w-[104px] -translate-x-1/2 -translate-y-1/2 rounded-md border border-line bg-white px-3 py-2 text-left text-sm hover:border-neutral-400"
-          style={{ left: `${item.left}%`, top: `${item.top}%` }}
-          onClick={() => onSelectSkill(item.name)}
-        >
-          <span className="block font-medium">{item.name}</span>
-          <span className="mt-0.5 block text-xs text-neutral-500">
-            {item.count} jobs with {selectedSkill}
-          </span>
-        </button>
-      ))}
-
-      <div className="absolute bottom-4 left-4 z-20 w-[260px] rounded-md border border-line bg-white p-3">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <div className="text-sm font-semibold">Related skills</div>
-          <div className="text-xs text-neutral-500">Graph only</div>
-        </div>
-        <div className="space-y-2">
-          {relatedSkills.slice(0, 5).map((item) => (
-            <button
-              key={item.name}
-              className="grid w-full grid-cols-[86px_1fr_42px] items-center gap-2 text-left text-xs"
-              onClick={() => onSelectSkill(item.name)}
-            >
-              <span className="truncate font-medium">{item.name}</span>
-              <span className="h-1.5 rounded bg-neutral-100">
-                <span
-                  className="block h-1.5 rounded bg-skill"
-                  style={{ width: `${Math.max(8, Math.round((item.count / maxRelatedCount) * 100))}%` }}
-                />
-              </span>
-              <span className="text-right text-neutral-500">{item.count}</span>
-            </button>
-          ))}
-        </div>
+      <div className="absolute left-1/2 top-1/2 z-10 w-[148px] -translate-x-1/2 -translate-y-1/2 rounded-md border border-ink bg-white p-3 text-center">
+        <div className="text-xs text-neutral-500">Market</div>
+        <div className="mt-1 truncate text-sm font-semibold">{query || "Search"}</div>
       </div>
+
+      {positionedNodes.map((node) => {
+        const isSelected = selectedKeys.has(normalizeSkillKey(node.label));
+        return (
+          <button
+            key={node.id}
+            className={`absolute z-10 w-[128px] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-white px-3 py-2 text-left text-sm transition-colors ${
+              isSelected
+                ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+                : "border-line hover:border-neutral-400"
+            }`}
+            style={{ left: `${node.left}%`, top: `${node.top}%` }}
+            onClick={() => onToggleSelected(node.label)}
+            data-testid={`skill-node-${slugSkill(node.label)}`}
+          >
+            <span className="flex items-center gap-1.5 font-medium">
+              {isSelected ? <Check size={13} /> : null}
+              <span className="truncate">{node.label}</span>
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-function positionSkills(skills: RelatedSkill[]): PositionedSkill[] {
-  if (!skills.length) {
+function positionNodes(nodes: GraphNode[]): PositionedNode[] {
+  if (!nodes.length) {
     return [];
   }
 
-  const radiusX = 34;
+  const visibleNodes = nodes.slice(0, 8);
+  const radiusX = 35;
   const radiusY = 30;
-  return skills.map((skill, index) => {
-    const angle = -Math.PI / 2 + (index / skills.length) * Math.PI * 2;
+  return visibleNodes.map((node, index) => {
+    const angle = -Math.PI / 2 + (index / visibleNodes.length) * Math.PI * 2;
     return {
-      ...skill,
+      ...node,
       left: Math.round((50 + Math.cos(angle) * radiusX) * 10) / 10,
       top: Math.round((50 + Math.sin(angle) * radiusY) * 10) / 10
     };
@@ -577,11 +669,25 @@ function StatusMessage({ title, body }: { title: string; body: string }) {
   );
 }
 
-function InfoCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-line bg-[#fbfaf7] p-3">
-      <div className="text-xs text-neutral-500">{label}</div>
-      <div className="mt-1 text-sm font-medium">{value}</div>
-    </div>
-  );
+function sameSkill(left: string, right: string) {
+  return normalizeSkillKey(left) === normalizeSkillKey(right);
+}
+
+function jobsMatchingSkills(jobs: JobResult[], skills: string[]) {
+  const selectedKeys = skills.map((skill) => normalizeSkillKey(skill));
+  if (!selectedKeys.length) {
+    return jobs;
+  }
+  return jobs.filter((job) => {
+    const jobSkillKeys = new Set(job.skills.map((skill) => normalizeSkillKey(skill.name)));
+    return selectedKeys.every((skill) => jobSkillKeys.has(skill));
+  });
+}
+
+function normalizeSkillKey(skill: string) {
+  return skill.trim().toLowerCase();
+}
+
+function slugSkill(skill: string) {
+  return normalizeSkillKey(skill).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }

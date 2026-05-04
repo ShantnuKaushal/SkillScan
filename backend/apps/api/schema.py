@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
+from itertools import combinations
 
 import strawberry
 from django.db.models import Q
@@ -37,6 +39,21 @@ class JobResultType:
 class RelatedSkillType:
     name: str
     count: int
+
+
+@strawberry.type
+class MarketSkillType:
+    name: str
+    count: int
+    selected: bool
+
+
+@strawberry.type
+class RecommendedSkillType:
+    name: str
+    count: int
+    example_job_count: int
+    preview_jobs: list[JobResultType]
 
 
 @strawberry.type
@@ -78,6 +95,18 @@ class SkillGraphPayload:
     graph: GraphPayload
 
 
+@strawberry.type
+class CareerMapPayload:
+    query: str
+    corrected_query: str
+    total: int
+    selected_skills: list[str]
+    jobs: list[JobResultType]
+    market_skills: list[MarketSkillType]
+    recommended_skills: list[RecommendedSkillType]
+    graph: GraphPayload
+
+
 @dataclass(frozen=True)
 class SearchResult:
     total: int
@@ -87,6 +116,69 @@ class SearchResult:
 
 @strawberry.type
 class Query:
+    @strawberry.field
+    def career_map(
+        self,
+        query: str,
+        selected_skills: list[str] | None = None,
+        known_skills: list[str] | None = None,
+        remote: bool | None = None,
+        limit: int = 20,
+    ) -> CareerMapPayload:
+        bounded_limit = max(1, min(limit, 50))
+        corrected_query = _correct_query(query)
+        normalized_selected_skills = _normalize_selected_skills(
+            selected_skills if selected_skills is not None else known_skills or []
+        )
+        search_result = _search_with_elasticsearch(
+            corrected_query,
+            skill=None,
+            location=None,
+            remote=remote,
+            limit=bounded_limit,
+        )
+        if search_result is None:
+            search_result = _search_with_database(
+                corrected_query,
+                skill=None,
+                location=None,
+                remote=remote,
+                limit=bounded_limit,
+            )
+
+        jobs = [
+            _to_job_result(job, corrected_query, search_result.score_by_external_id.get(job.external_id, 1.0))
+            for job in search_result.jobs
+        ]
+        market_skills = _market_skills(jobs, normalized_selected_skills)
+        recommended_skills = _recommended_skills(jobs, normalized_selected_skills, corrected_query)
+        graph_payload = _career_graph(jobs, normalized_selected_skills, market_skills, recommended_skills)
+
+        return CareerMapPayload(
+            query=query,
+            corrected_query=corrected_query,
+            total=search_result.total,
+            selected_skills=normalized_selected_skills,
+            jobs=jobs,
+            market_skills=market_skills,
+            recommended_skills=recommended_skills,
+            graph=GraphPayload(
+                nodes=[
+                    GraphNodeType(id=node["id"], label=node["label"], type=node["type"])
+                    for node in graph_payload["nodes"]
+                ],
+                edges=[
+                    GraphEdgeType(
+                        source=edge["source"],
+                        target=edge["target"],
+                        type=edge["type"],
+                        weight=edge["weight"],
+                    )
+                    for edge in graph_payload["edges"]
+                ],
+            ),
+        )
+
     @strawberry.field
     def search_jobs(
         self,
@@ -253,6 +345,137 @@ def _graph_context(seed_skill: str) -> tuple[list[dict], dict]:
             if graph is not None:
                 graph.close()
     return [], {"nodes": [], "edges": []}
+
+
+def _normalize_selected_skills(skills: list[str]) -> list[str]:
+    normalizer = SkillNormalizer()
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for skill in skills:
+        candidate = normalizer.normalize_term(skill) or skill.strip()
+        if not candidate:
+            continue
+        key = candidate.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(candidate)
+    return normalized
+
+
+def _market_skills(jobs: list[JobResultType], selected_skills: list[str], limit: int = 12) -> list[MarketSkillType]:
+    selected_keys = {skill.casefold() for skill in selected_skills}
+    counts = _skill_counts(jobs)
+    return [
+        MarketSkillType(name=name, count=count, selected=name.casefold() in selected_keys)
+        for name, count in counts.most_common(limit)
+    ]
+
+
+def _recommended_skills(
+    jobs: list[JobResultType],
+    selected_skills: list[str],
+    query: str,
+    limit: int = 6,
+) -> list[RecommendedSkillType]:
+    selected_keys = {skill.casefold() for skill in selected_skills}
+    scored: list[tuple[str, int, list[JobResultType]]] = []
+    for name, count in _skill_counts(jobs).most_common():
+        if name.casefold() in selected_keys:
+            continue
+        preview_jobs = _preview_jobs_for_skill(jobs, name, selected_keys)
+        if not preview_jobs:
+            continue
+        scored.append((name, count, preview_jobs))
+
+    scored.sort(key=lambda item: (-len(item[2]), -item[1], item[0].casefold()))
+    return [
+        RecommendedSkillType(
+            name=name,
+            count=len(preview_jobs),
+            example_job_count=len(preview_jobs),
+            preview_jobs=[
+                _job_with_match_reason(job, query, f"Adds {name} to your selected skill set")
+                for job in preview_jobs[:3]
+            ],
+        )
+        for name, count, preview_jobs in scored[:limit]
+    ]
+
+
+def _preview_jobs_for_skill(
+    jobs: list[JobResultType],
+    skill_name: str,
+    selected_keys: set[str],
+) -> list[JobResultType]:
+    preview_jobs: list[JobResultType] = []
+    for job in jobs:
+        job_skill_keys = {skill.name.casefold() for skill in job.skills}
+        if skill_name.casefold() not in job_skill_keys:
+            continue
+        if selected_keys and not selected_keys.issubset(job_skill_keys):
+            continue
+        preview_jobs.append(job)
+    return preview_jobs
+
+
+def _career_graph(
+    jobs: list[JobResultType],
+    selected_skills: list[str],
+    market_skills: list[MarketSkillType],
+    recommended_skills: list[RecommendedSkillType],
+) -> dict:
+    selected_keys = {skill.casefold() for skill in selected_skills}
+    recommended_keys = {skill.name.casefold() for skill in recommended_skills}
+    visible_names = [item.name for item in market_skills[:10]]
+    visible_keys = {name.casefold() for name in visible_names}
+
+    nodes = []
+    for name in visible_names:
+        node_type = "selectedSkill" if name.casefold() in selected_keys else "recommendedSkill" if name.casefold() in recommended_keys else "marketSkill"
+        nodes.append({"id": f"skill:{name}", "label": name, "type": node_type})
+
+    edge_counts: Counter[tuple[str, str]] = Counter()
+    for job in jobs:
+        names = sorted({skill.name for skill in job.skills if skill.name.casefold() in visible_keys})
+        for left, right in combinations(names, 2):
+            edge_counts[(left, right)] += 1
+
+    edges = [
+        {
+            "source": f"skill:{left}",
+            "target": f"skill:{right}",
+            "type": "SELECTED_WITH" if left.casefold() in selected_keys or right.casefold() in selected_keys else "OFTEN_WITH",
+            "weight": count,
+        }
+        for (left, right), count in edge_counts.most_common(14)
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _skill_counts(jobs: list[JobResultType]) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    for job in jobs:
+        for name in {skill.name for skill in job.skills}:
+            counts[name] += 1
+    return counts
+
+
+def _job_with_match_reason(job: JobResultType, query: str, match_reason: str) -> JobResultType:
+    return JobResultType(
+        id=job.id,
+        title=job.title,
+        company=job.company,
+        location=job.location,
+        remote_allowed=job.remote_allowed,
+        work_type=job.work_type,
+        experience_level=job.experience_level,
+        description_snippet=job.description_snippet,
+        posting_url=job.posting_url,
+        score=job.score,
+        match_reason=match_reason or f"Matched {query}",
+        skills=job.skills,
+    )
 
 
 def _to_job_result(job: JobPosting, query: str, score: float) -> JobResultType:
